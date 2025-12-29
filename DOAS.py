@@ -109,4 +109,9 @@ st.subheader("🔄 Live Simulation")
 placeholder = st.empty()
 
 for i in range(10):
-    with placeholder.container
+    with placeholder.container():
+        st.write(f"Airflow cycle: {i+1}")
+        progress = st.progress(i * 10)
+    time.sleep(0.3)
+
+st.success("Simulation Complete 🚀")
