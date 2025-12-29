@@ -1,126 +1,114 @@
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
 import time
 
-# --------------------------------------------------
-# Page Setup
-# --------------------------------------------------
-st.set_page_config("Practical DOAS Simulator", layout="wide")
-st.title("🏢 Practical DOAS Unit – Controls Simulation")
+# --- Page Config ---
+st.set_page_config(page_title="Advanced DOAS Lab Simulator", layout="wide")
 
-# --------------------------------------------------
-# Psychrometric Enthalpy
-# --------------------------------------------------
-def enthalpy(T, RH):
-    Pw = RH / 100 * 6.112 * np.exp((17.67 * T) / (T + 243.5))
-    W = 0.622 * Pw / (1013 - Pw)
+# --- Psychrometric Helper Functions ---
+def get_properties(T, RH):
+    """Returns Enthalpy (h) and Humidity Ratio (W)"""
+    # Saturation vapor pressure (hPa)
+    Es = 6.112 * np.exp((17.67 * T) / (T + 243.5))
+    # Actual vapor pressure
+    Pw = (RH / 100.0) * Es
+    # Humidity Ratio (kg/kg)
+    W = 0.622 * Pw / (1013.25 - Pw)
+    # Enthalpy (kJ/kg)
     h = 1.006 * T + W * (2501 + 1.86 * T)
-    return round(h, 1)
+    return h, W
 
-# --------------------------------------------------
-# Sidebar Inputs (Realistic)
-# --------------------------------------------------
-st.sidebar.header("Outdoor Air Conditions")
+# --- Simulation Logic ---
+def simulate_doas(oa_t, oa_rh, ra_t, ra_rh, cfm, sa_t_set, erv_eff):
+    # 1. OA Entrance
+    oa_h, oa_w = get_properties(oa_t, oa_rh)
+    ra_h, ra_w = get_properties(ra_t, ra_rh)
+    
+    # 2. Energy Recovery Wheel (ERV)
+    # Effectiveness equation: T_leaving = T_entering + eff * (T_exhaust - T_entering)
+    precon_t = oa_t + erv_eff * (ra_t - oa_t)
+    precon_h = oa_h + erv_eff * (ra_h - oa_h)
+    
+    # 3. Cooling Coil (Dehumidification)
+    # Target: 12°C Dew Point for moisture removal
+    cooling_target_t = 12.0 
+    cooling_needed = max(0, precon_t - cooling_target_t)
+    
+    # Leaving Cooling Coil (Latent + Sensible)
+    lat_t = min(precon_t, cooling_target_t)
+    lat_rh = 95.0 # Saturated
+    lat_h, lat_w = get_properties(lat_t, lat_rh)
+    
+    # 4. Reheat Coil (Sensible only)
+    reheat_needed = max(0, sa_t_set - lat_t)
+    sa_t = lat_t + reheat_needed
+    sa_h, sa_w = get_properties(sa_t, 10) # RH will drop as we heat
+    # Calculate final RH after reheat (W remains constant)
+    sa_rh = (sa_w * 1013.25 / (0.622 + sa_w)) / (6.112 * np.exp((17.67 * sa_t) / (sa_t + 243.5))) * 100
 
-OA_T = st.sidebar.slider("OA Temperature (°C)", -20, 45, 32)
-OA_RH = st.sidebar.slider("OA Relative Humidity (%)", 10, 100, 65)
+    # 5. Load Calculation (kW)
+    # Mass flow rate (approx)
+    m_dot = (cfm * 1.2) / 2118 # kg/s
+    cooling_kw = m_dot * (precon_h - lat_h)
+    reheat_kw = m_dot * (sa_h - lat_h)
+    
+    return {
+        "Precon T": round(precon_t, 1),
+        "SA T": round(sa_t, 1),
+        "SA RH": round(min(100, sa_rh), 1),
+        "Cooling Load": round(cooling_kw, 2),
+        "Reheat Load": round(reheat_kw, 2),
+        "ERV Savings": round(m_dot * (oa_h - precon_h), 2)
+    }
 
-st.sidebar.header("Setpoints")
-SA_T_SP = st.sidebar.slider("Supply Air Temp SP (°C)", 12, 22, 16)
-SA_CFM = st.sidebar.slider("Airflow (CFM)", 500, 5000, 2500)
+# --- UI Layout ---
+st.title("🏢 Advanced DOAS Lab Simulator")
+st.markdown("This simulator tracks **Enthalpy Wheel** recovery and **Latent/Sensible** cooling loads.")
 
-st.sidebar.header("System")
-Fan_Enable = st.sidebar.toggle("Supply Fan", True)
+with st.sidebar:
+    st.header("🌍 Ambient Conditions")
+    oa_t = st.slider("Outdoor Temp (°C)", -10, 45, 32)
+    oa_rh = st.slider("Outdoor Humidity (%)", 10, 100, 70)
+    
+    st.header("🏠 Return Air (Internal)")
+    ra_t = st.number_input("Return Temp (°C)", value=24)
+    ra_rh = st.number_input("Return Humidity (%)", value=50)
+    
+    st.header("⚙️ Equipment Specs")
+    sa_t_set = st.slider("Supply Air Setpoint (°C)", 13, 24, 18)
+    cfm = st.number_input("Airflow Volume (CFM)", 500, 10000, 2000)
+    erv_eff = st.slider("ERV Effectiveness", 0.0, 0.85, 0.70)
 
-# --------------------------------------------------
-# Control Logic (Practical)
-# --------------------------------------------------
-OA_Damper = 100  # DOAS = 100% OA
-RA_Damper = 0
+# --- Execute Simulation ---
+res = simulate_doas(oa_t, oa_rh, ra_t, ra_rh, cfm, sa_t_set, erv_eff)
 
-Preheat_Output = max(0, (SA_T_SP - OA_T) * 4)
-Cooling_Output = max(0, (OA_T - SA_T_SP) * 5)
-Reheat_Output = max(0, (SA_T_SP - (OA_T - Cooling_Output / 10)) * 3)
+# --- Display Results ---
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Supply Air Temp", f"{res['SA T']} °C")
+m2.metric("Supply Humidity", f"{res['SA RH']} %")
+m3.metric("Cooling Power", f"{res['Cooling Load']} kW")
+m4.metric("Heating Power", f"{res['Reheat Load']} kW")
 
-Preheat_Output = min(Preheat_Output, 100)
-Cooling_Output = min(Cooling_Output, 100)
-Reheat_Output = min(Reheat_Output, 100)
+st.divider()
 
-Fan_Speed = 100 if Fan_Enable else 0
+col1, col2 = st.columns(2)
 
-# Supply conditions
-SA_T = SA_T_SP
-SA_RH = max(45, OA_RH - Cooling_Output * 0.3)
+with col1:
+    st.subheader("Process Flow Information")
+    st.write(f"**ERV Discharge Temp:** {res['Precon T']} °C")
+    st.info(f"The ERV is currently reclaiming **{res['ERV Savings']} kW** of energy from the exhaust stream.")
+    
+    # Progress bars for valve positions
+    st.write("Cooling Valve")
+    st.progress(min(1.0, res['Cooling Load'] / 50))
+    st.write("Reheat Valve")
+    st.progress(min(1.0, res['Reheat Load'] / 20))
 
-# --------------------------------------------------
-# Enthalpy
-# --------------------------------------------------
-OA_h = enthalpy(OA_T, OA_RH)
-SA_h = enthalpy(SA_T, SA_RH)
-
-# --------------------------------------------------
-# Display Sensors
-# --------------------------------------------------
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("OA Temp", f"{OA_T} °C")
-c2.metric("OA Enthalpy", f"{OA_h} kJ/kg")
-c3.metric("SA Temp", f"{SA_T} °C")
-c4.metric("SA RH", f"{SA_RH:.1f} %")
-c5.metric("SA Enthalpy", f"{SA_h} kJ/kg")
-
-# --------------------------------------------------
-# DOAS Visualization (Practical Layout)
-# --------------------------------------------------
-st.subheader("DOAS Unit – Practical Layout")
-
-fig, ax = plt.subplots(figsize=(14, 4))
-ax.set_xlim(0, 14)
-ax.set_ylim(0, 4)
-ax.axis("off")
-
-def box(x, label):
-    ax.add_patch(plt.Rectangle((x, 1.3), 1.6, 1.4))
-    ax.text(x + 0.8, 3, label, ha="center", fontsize=9)
-
-# Components
-box(0.5, f"OA Damper\n{OA_Damper}%")
-box(2.5, "Mixing Box")
-box(4.5, "Filter")
-box(6.5, f"Preheat\n{Preheat_Output:.0f}%")
-box(8.5, f"Cooling\n{Cooling_Output:.0f}%")
-box(10.5, f"Reheat\n{Reheat_Output:.0f}%")
-
-# Fan
-ax.add_patch(plt.Circle((12.7, 2), 0.6))
-ax.text(12.7, 3, f"Fan\n{Fan_Speed}%", ha="center")
-
-# Supply
-box(13.8, "Supply Air")
-
-# Airflow
-if Fan_Enable:
-    ax.arrow(0.3, 2, 13.8, 0, head_width=0.15, head_length=0.25)
-
-# Condensate
-if Cooling_Output > 0:
-    ax.text(8.7, 0.7, "💧 Condensate Drain", fontsize=10)
-
-st.pyplot(fig)
-
-# --------------------------------------------------
-# Live Operation Simulation
-# --------------------------------------------------
-st.subheader("Live Operation")
-
-progress = st.progress(0)
-status = st.empty()
-
-for i in range(100):
-    progress.progress(i + 1)
-    status.write(
-        f"Fan {Fan_Speed}% | Cooling {Cooling_Output:.0f}% | Reheat {Reheat_Output:.0f}%"
-    )
-    time.sleep(0.02)
-
-status.success("DOAS Operating Normally ✅")
+with col2:
+    st.subheader("Psychrometric Summary")
+    chart_data = pd.DataFrame({
+        "Stage": ["Outdoor", "After ERV", "After Cooling", "Supply"],
+        "Temp": [oa_t, res['Precon T'], 12.0, res['SA T']]
+    })
+    st.line_chart(chart_data.set_index("Stage"))
