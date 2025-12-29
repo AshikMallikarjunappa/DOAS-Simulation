@@ -3,117 +3,124 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-# -----------------------------
-# Page Config
-# -----------------------------
-st.set_page_config(page_title="DOAS Simulator", layout="wide")
+# --------------------------------------------------
+# Page Setup
+# --------------------------------------------------
+st.set_page_config("Practical DOAS Simulator", layout="wide")
+st.title("🏢 Practical DOAS Unit – Controls Simulation")
 
-# -----------------------------
-# Psychrometric Calculation
-# -----------------------------
+# --------------------------------------------------
+# Psychrometric Enthalpy
+# --------------------------------------------------
 def enthalpy(T, RH):
-    """
-    T  : Dry Bulb Temp (°C)
-    RH : Relative Humidity (%)
-    Returns Enthalpy (kJ/kg)
-    """
     Pw = RH / 100 * 6.112 * np.exp((17.67 * T) / (T + 243.5))
     W = 0.622 * Pw / (1013 - Pw)
     h = 1.006 * T + W * (2501 + 1.86 * T)
-    return round(h, 2)
+    return round(h, 1)
 
-# -----------------------------
-# Sidebar Inputs
-# -----------------------------
-st.sidebar.title("DOAS Inputs")
+# --------------------------------------------------
+# Sidebar Inputs (Realistic)
+# --------------------------------------------------
+st.sidebar.header("Outdoor Air Conditions")
 
-OA_T = st.sidebar.slider("Outdoor Air Temp (°C)", -10, 45, 30)
-OA_RH = st.sidebar.slider("Outdoor Air RH (%)", 10, 100, 60)
-SA_Setpoint = st.sidebar.slider("Supply Air Setpoint (°C)", 12, 22, 16)
-Fan_On = st.sidebar.checkbox("Supply Fan ON", True)
+OA_T = st.sidebar.slider("OA Temperature (°C)", -20, 45, 32)
+OA_RH = st.sidebar.slider("OA Relative Humidity (%)", 10, 100, 65)
 
-# -----------------------------
-# Control Logic
-# -----------------------------
-Cooling_Coil = OA_T > SA_Setpoint
-Heating_Coil = OA_T < SA_Setpoint
+st.sidebar.header("Setpoints")
+SA_T_SP = st.sidebar.slider("Supply Air Temp SP (°C)", 12, 22, 16)
+SA_CFM = st.sidebar.slider("Airflow (CFM)", 500, 5000, 2500)
 
-if Cooling_Coil:
-    SA_T = SA_Setpoint
-elif Heating_Coil:
-    SA_T = SA_Setpoint
-else:
-    SA_T = OA_T
+st.sidebar.header("System")
+Fan_Enable = st.sidebar.toggle("Supply Fan", True)
 
-SA_RH = max(40, OA_RH - 20)
+# --------------------------------------------------
+# Control Logic (Practical)
+# --------------------------------------------------
+OA_Damper = 100  # DOAS = 100% OA
+RA_Damper = 0
 
-# -----------------------------
-# Enthalpy Calculation
-# -----------------------------
+Preheat_Output = max(0, (SA_T_SP - OA_T) * 4)
+Cooling_Output = max(0, (OA_T - SA_T_SP) * 5)
+Reheat_Output = max(0, (SA_T_SP - (OA_T - Cooling_Output / 10)) * 3)
+
+Preheat_Output = min(Preheat_Output, 100)
+Cooling_Output = min(Cooling_Output, 100)
+Reheat_Output = min(Reheat_Output, 100)
+
+Fan_Speed = 100 if Fan_Enable else 0
+
+# Supply conditions
+SA_T = SA_T_SP
+SA_RH = max(45, OA_RH - Cooling_Output * 0.3)
+
+# --------------------------------------------------
+# Enthalpy
+# --------------------------------------------------
 OA_h = enthalpy(OA_T, OA_RH)
 SA_h = enthalpy(SA_T, SA_RH)
 
-# -----------------------------
-# Metrics
-# -----------------------------
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("OA Temp (°C)", OA_T)
-c2.metric("OA Enthalpy (kJ/kg)", OA_h)
-c3.metric("SA Temp (°C)", SA_T)
-c4.metric("SA Enthalpy (kJ/kg)", SA_h)
+# --------------------------------------------------
+# Display Sensors
+# --------------------------------------------------
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("OA Temp", f"{OA_T} °C")
+c2.metric("OA Enthalpy", f"{OA_h} kJ/kg")
+c3.metric("SA Temp", f"{SA_T} °C")
+c4.metric("SA RH", f"{SA_RH:.1f} %")
+c5.metric("SA Enthalpy", f"{SA_h} kJ/kg")
 
-# -----------------------------
-# DOAS Diagram
-# -----------------------------
-st.subheader("DOAS Unit Visualization")
+# --------------------------------------------------
+# DOAS Visualization (Practical Layout)
+# --------------------------------------------------
+st.subheader("DOAS Unit – Practical Layout")
 
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.set_xlim(0, 10)
+fig, ax = plt.subplots(figsize=(14, 4))
+ax.set_xlim(0, 14)
 ax.set_ylim(0, 4)
 ax.axis("off")
 
+def box(x, label):
+    ax.add_patch(plt.Rectangle((x, 1.3), 1.6, 1.4))
+    ax.text(x + 0.8, 3, label, ha="center", fontsize=9)
+
 # Components
-ax.add_patch(plt.Rectangle((0.3, 1.5), 1.2, 1))
-ax.text(0.35, 2.7, "OA Damper")
+box(0.5, f"OA Damper\n{OA_Damper}%")
+box(2.5, "Mixing Box")
+box(4.5, "Filter")
+box(6.5, f"Preheat\n{Preheat_Output:.0f}%")
+box(8.5, f"Cooling\n{Cooling_Output:.0f}%")
+box(10.5, f"Reheat\n{Reheat_Output:.0f}%")
 
-ax.add_patch(plt.Rectangle((1.9, 1.5), 1.3, 1))
-ax.text(2.0, 2.7, "Filter")
+# Fan
+ax.add_patch(plt.Circle((12.7, 2), 0.6))
+ax.text(12.7, 3, f"Fan\n{Fan_Speed}%", ha="center")
 
-ax.add_patch(plt.Rectangle((3.6, 1.5), 1.5, 1))
-ax.text(3.65, 2.7, "Cooling Coil")
+# Supply
+box(13.8, "Supply Air")
 
-ax.add_patch(plt.Rectangle((5.4, 1.5), 1.5, 1))
-ax.text(5.45, 2.7, "Heating Coil")
+# Airflow
+if Fan_Enable:
+    ax.arrow(0.3, 2, 13.8, 0, head_width=0.15, head_length=0.25)
 
-ax.add_patch(plt.Circle((7.6, 2), 0.5))
-ax.text(7.4, 2.7, "Fan")
-
-ax.add_patch(plt.Rectangle((8.6, 1.5), 1.2, 1))
-ax.text(8.65, 2.7, "Supply Air")
-
-# Airflow Arrow
-if Fan_On:
-    ax.arrow(0.5, 2, 8.2, 0, head_width=0.15, head_length=0.2)
-
-# Coil Status
-if Cooling_Coil:
-    ax.text(3.7, 1.2, "❄ Cooling ON", color="blue")
-if Heating_Coil:
-    ax.text(5.5, 1.2, "🔥 Heating ON", color="red")
+# Condensate
+if Cooling_Output > 0:
+    ax.text(8.7, 0.7, "💧 Condensate Drain", fontsize=10)
 
 st.pyplot(fig)
 
-# -----------------------------
-# Animation (NO `with` usage)
-# -----------------------------
-st.subheader("Live Airflow Simulation")
+# --------------------------------------------------
+# Live Operation Simulation
+# --------------------------------------------------
+st.subheader("Live Operation")
 
 progress = st.progress(0)
 status = st.empty()
 
 for i in range(100):
     progress.progress(i + 1)
-    status.write(f"Airflow running... {i + 1}%")
+    status.write(
+        f"Fan {Fan_Speed}% | Cooling {Cooling_Output:.0f}% | Reheat {Reheat_Output:.0f}%"
+    )
     time.sleep(0.02)
 
-status.success("Simulation Complete 🚀")
+status.success("DOAS Operating Normally ✅")
