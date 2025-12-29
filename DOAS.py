@@ -4,13 +4,18 @@ import matplotlib.pyplot as plt
 import time
 
 # -----------------------------
-# Psychrometric Functions
+# Page Config
+# -----------------------------
+st.set_page_config(page_title="DOAS Simulator", layout="wide")
+
+# -----------------------------
+# Psychrometric Calculation
 # -----------------------------
 def enthalpy(T, RH):
     """
-    T : Dry bulb temperature (°C)
+    T  : Dry Bulb Temp (°C)
     RH : Relative Humidity (%)
-    Returns enthalpy in kJ/kg
+    Returns Enthalpy (kJ/kg)
     """
     Pw = RH / 100 * 6.112 * np.exp((17.67 * T) / (T + 243.5))
     W = 0.622 * Pw / (1013 - Pw)
@@ -18,18 +23,14 @@ def enthalpy(T, RH):
     return round(h, 2)
 
 # -----------------------------
-# Streamlit UI
+# Sidebar Inputs
 # -----------------------------
-st.set_page_config(layout="wide")
-st.title("🌬️ DOAS Unit Simulator (Fun Mode)")
+st.sidebar.title("DOAS Inputs")
 
-st.sidebar.header("Input Conditions")
-
-OA_T = st.sidebar.slider("Outdoor Air Temp (°C)", -10, 45, 32)
+OA_T = st.sidebar.slider("Outdoor Air Temp (°C)", -10, 45, 30)
 OA_RH = st.sidebar.slider("Outdoor Air RH (%)", 10, 100, 60)
-
 SA_Setpoint = st.sidebar.slider("Supply Air Setpoint (°C)", 12, 22, 16)
-Fan_Status = st.sidebar.toggle("Supply Fan", True)
+Fan_On = st.sidebar.checkbox("Supply Fan ON", True)
 
 # -----------------------------
 # Control Logic
@@ -47,7 +48,7 @@ else:
 SA_RH = max(40, OA_RH - 20)
 
 # -----------------------------
-# Enthalpy
+# Enthalpy Calculation
 # -----------------------------
 OA_h = enthalpy(OA_T, OA_RH)
 SA_h = enthalpy(SA_T, SA_RH)
@@ -55,63 +56,64 @@ SA_h = enthalpy(SA_T, SA_RH)
 # -----------------------------
 # Metrics
 # -----------------------------
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("OA Temp (°C)", OA_T)
-col2.metric("OA Enthalpy (kJ/kg)", OA_h)
-col3.metric("SA Temp (°C)", SA_T)
-col4.metric("SA Enthalpy (kJ/kg)", SA_h)
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("OA Temp (°C)", OA_T)
+c2.metric("OA Enthalpy (kJ/kg)", OA_h)
+c3.metric("SA Temp (°C)", SA_T)
+c4.metric("SA Enthalpy (kJ/kg)", SA_h)
 
 # -----------------------------
-# DOAS Unit Visualization
+# DOAS Diagram
 # -----------------------------
+st.subheader("DOAS Unit Visualization")
+
 fig, ax = plt.subplots(figsize=(10, 4))
 ax.set_xlim(0, 10)
 ax.set_ylim(0, 4)
 ax.axis("off")
 
 # Components
-ax.add_patch(plt.Rectangle((0.2, 1.5), 1.2, 1, fill=False))
-ax.text(0.25, 2.7, "OA Damper")
+ax.add_patch(plt.Rectangle((0.3, 1.5), 1.2, 1))
+ax.text(0.35, 2.7, "OA Damper")
 
-ax.add_patch(plt.Rectangle((1.8, 1.5), 1.5, 1, fill=False))
-ax.text(1.9, 2.7, "Filter")
+ax.add_patch(plt.Rectangle((1.9, 1.5), 1.3, 1))
+ax.text(2.0, 2.7, "Filter")
 
-ax.add_patch(plt.Rectangle((3.6, 1.5), 1.5, 1, fill=False))
+ax.add_patch(plt.Rectangle((3.6, 1.5), 1.5, 1))
 ax.text(3.65, 2.7, "Cooling Coil")
 
-ax.add_patch(plt.Rectangle((5.4, 1.5), 1.5, 1, fill=False))
+ax.add_patch(plt.Rectangle((5.4, 1.5), 1.5, 1))
 ax.text(5.45, 2.7, "Heating Coil")
 
-ax.add_patch(plt.Circle((7.6, 2), 0.5, fill=False))
-ax.text(7.35, 2.7, "Fan")
+ax.add_patch(plt.Circle((7.6, 2), 0.5))
+ax.text(7.4, 2.7, "Fan")
 
-ax.add_patch(plt.Rectangle((8.6, 1.5), 1.2, 1, fill=False))
-ax.text(8.65, 2.7, "SA")
+ax.add_patch(plt.Rectangle((8.6, 1.5), 1.2, 1))
+ax.text(8.65, 2.7, "Supply Air")
 
-# Airflow arrow
-if Fan_Status:
-    ax.arrow(0.3, 2, 8.8, 0, head_width=0.15, head_length=0.2, fc='green', ec='green')
+# Airflow Arrow
+if Fan_On:
+    ax.arrow(0.5, 2, 8.2, 0, head_width=0.15, head_length=0.2)
 
 # Coil Status
 if Cooling_Coil:
-    ax.text(3.7, 1.2, "❄️ Active", color="blue")
+    ax.text(3.7, 1.2, "❄ Cooling ON", color="blue")
 if Heating_Coil:
-    ax.text(5.5, 1.2, "🔥 Active", color="red")
+    ax.text(5.5, 1.2, "🔥 Heating ON", color="red")
 
 st.pyplot(fig)
 
 # -----------------------------
-# Animated Simulation
+# Animation (NO `with` usage)
 # -----------------------------
-st.subheader("🔄 Live Simulation")
+st.subheader("Live Airflow Simulation")
 
-placeholder = st.empty()
+progress = st.progress(0)
+status = st.empty()
 
-for i in range(10):
-    with placeholder.container():
-        st.write(i)
-        progress = st.progress(i * 10)
-    time.sleep(0.3)
+for i in range(100):
+    progress.progress(i + 1)
+    status.write(f"Airflow running... {i + 1}%")
+    time.sleep(0.02)
 
-st.success("Simulation Complete 🚀")
+status.success("Simulation Complete 🚀")
