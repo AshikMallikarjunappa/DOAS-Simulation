@@ -110,7 +110,7 @@ placeholder = st.empty()
 
 for i in range(10):
     with placeholder.container():
-        st.write(f"Airflow cycle: {i+1}")
+        st.write(i)
         progress = st.progress(i * 10)
     time.sleep(0.3)
 
